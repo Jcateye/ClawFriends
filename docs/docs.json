@@ -937,6 +937,7 @@
                 "group": "Fundamentals",
                 "pages": [
                   "concepts/architecture",
+                  "concepts/friendsai-agent-architecture",
                   "concepts/agent",
                   "concepts/agent-loop",
                   "concepts/system-prompt",
@@ -1466,6 +1467,7 @@
                 "group": "基础",
                 "pages": [
                   "zh-CN/concepts/architecture",
+                  "zh-CN/concepts/friendsai-agent-architecture",
                   "zh-CN/concepts/agent",
                   "zh-CN/concepts/agent-loop",
                   "zh-CN/concepts/system-prompt",
