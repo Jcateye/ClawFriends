@@ -1,8 +1,12 @@
 import AjvPkg, { type ErrorObject } from "ajv";
 import type { SessionsPatchResult } from "../session-utils.types.js";
 import {
+  type AgentConfirmParams,
+  AgentConfirmParamsSchema,
   type AgentEvent,
   AgentEventSchema,
+  type AgentExecuteParams,
+  AgentExecuteParamsSchema,
   type AgentIdentityParams,
   AgentIdentityParamsSchema,
   type AgentIdentityResult,
@@ -245,6 +249,8 @@ export const validateEventFrame = ajv.compile<EventFrame>(EventFrameSchema);
 export const validateSendParams = ajv.compile(SendParamsSchema);
 export const validatePollParams = ajv.compile<PollParams>(PollParamsSchema);
 export const validateAgentParams = ajv.compile(AgentParamsSchema);
+export const validateAgentExecuteParams = ajv.compile<AgentExecuteParams>(AgentExecuteParamsSchema);
+export const validateAgentConfirmParams = ajv.compile<AgentConfirmParams>(AgentConfirmParamsSchema);
 export const validateAgentIdentityParams =
   ajv.compile<AgentIdentityParams>(AgentIdentityParamsSchema);
 export const validateAgentWaitParams = ajv.compile<AgentWaitParams>(AgentWaitParamsSchema);
@@ -433,6 +439,8 @@ export {
   SendParamsSchema,
   PollParamsSchema,
   AgentParamsSchema,
+  AgentExecuteParamsSchema,
+  AgentConfirmParamsSchema,
   AgentIdentityParamsSchema,
   AgentIdentityResultSchema,
   WakeParamsSchema,

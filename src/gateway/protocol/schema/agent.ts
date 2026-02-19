@@ -96,6 +96,36 @@ export const AgentParamsSchema = Type.Object(
   { additionalProperties: false },
 );
 
+export const AgentExecuteParamsSchema = Type.Object(
+  {
+    tenantId: NonEmptyString,
+    agentScope: NonEmptyString,
+    sessionKey: NonEmptyString,
+    agentId: NonEmptyString,
+    operation: Type.Union([Type.Literal("chat"), Type.Literal("run")]),
+    mode: Type.Optional(Type.Union([Type.Literal("stream"), Type.Literal("unary")])),
+    input: Type.Record(Type.String(), Type.Unknown()),
+    traceId: NonEmptyString,
+    protocolVersion: Type.Union([Type.Literal("v1"), Type.Literal("v2")]),
+    idempotencyKey: NonEmptyString,
+    timeout: Type.Optional(Type.Integer({ minimum: 0 })),
+    thinking: Type.Optional(Type.String()),
+    deliver: Type.Optional(Type.Boolean()),
+    channel: Type.Optional(Type.String()),
+    to: Type.Optional(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+export const AgentConfirmParamsSchema = Type.Object(
+  {
+    confirmationId: NonEmptyString,
+    approved: Type.Boolean(),
+    traceId: NonEmptyString,
+  },
+  { additionalProperties: false },
+);
+
 export const AgentIdentityParamsSchema = Type.Object(
   {
     agentId: Type.Optional(NonEmptyString),

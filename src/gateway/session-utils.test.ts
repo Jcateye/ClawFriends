@@ -8,10 +8,12 @@ import {
   capArrayByJsonBytes,
   classifySessionKey,
   deriveSessionTitle,
+  isSessionKeyWithinTenantScope,
   listAgentsForGateway,
   listSessionsFromStore,
   parseGroupKey,
   pruneLegacyStoreKeys,
+  resolveTenantScopeSessionPrefix,
   resolveGatewaySessionStoreTarget,
   resolveSessionModelIdentityRef,
   resolveSessionModelRef,
@@ -492,6 +494,36 @@ describe("resolveSessionModelIdentityRef", () => {
       provider: "vercel-ai-gateway",
       model: "anthropic/claude-sonnet-4-6",
     });
+  });
+
+  test("tenant scope session key contract supports canonical and legacy prefixes", () => {
+    expect(
+      isSessionKeyWithinTenantScope({
+        tenantId: "tenant-1",
+        agentScope: "agent-1",
+        sessionKey: "tenant:tenant-1:scope:agent-1:conv:123",
+      }),
+    ).toBe(true);
+    expect(
+      isSessionKeyWithinTenantScope({
+        tenantId: "tenant-1",
+        agentScope: "agent-1",
+        sessionKey: "tenant-1:agent-1:conv:123",
+      }),
+    ).toBe(true);
+    expect(
+      isSessionKeyWithinTenantScope({
+        tenantId: "tenant-1",
+        agentScope: "agent-1",
+        sessionKey: "tenant:tenant-2:scope:agent-1:conv:123",
+      }),
+    ).toBe(false);
+  });
+
+  test("resolveTenantScopeSessionPrefix builds canonical prefix", () => {
+    expect(resolveTenantScopeSessionPrefix({ tenantId: "Tenant-1", agentScope: "Scope-A" })).toBe(
+      "tenant:tenant-1:scope:scope-a:",
+    );
   });
 });
 

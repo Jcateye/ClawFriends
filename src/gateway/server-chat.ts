@@ -277,6 +277,40 @@ export function createAgentEventHandler({
   clearAgentRunContext,
   toolEventRecipients,
 }: AgentEventHandlerOptions) {
+  type StreamRunMetrics = {
+    acceptedAtMs: number;
+    firstTokenMs: number | null;
+    toolCount: number;
+  };
+
+  const streamMetricsByRun = new Map<string, StreamRunMetrics>();
+  const normalizedFinalizedRuns = new Set<string>();
+
+  const getOrCreateStreamMetrics = (runId: string, ts: number): StreamRunMetrics => {
+    const existing = streamMetricsByRun.get(runId);
+    if (existing) {
+      return existing;
+    }
+    const created: StreamRunMetrics = {
+      acceptedAtMs: ts,
+      firstTokenMs: null,
+      toolCount: 0,
+    };
+    streamMetricsByRun.set(runId, created);
+    return created;
+  };
+
+  const emitNormalizedEvent = (
+    event: string,
+    payload: Record<string, unknown>,
+    sessionKey?: string,
+  ) => {
+    broadcast(event, payload, { dropIfSlow: true });
+    if (sessionKey) {
+      nodeSendToSession(sessionKey, event, payload);
+    }
+  };
+
   const emitChatDelta = (
     sessionKey: string,
     clientRunId: string,
@@ -338,6 +372,17 @@ export function createAgentEventHandler({
     chatRunState.buffers.delete(clientRunId);
     chatRunState.deltaSentAt.delete(clientRunId);
     if (jobState === "done") {
+      if (text) {
+        const messagePayload = {
+          runId: clientRunId,
+          sessionKey,
+          seq,
+          ts: Date.now(),
+          role: "assistant",
+          content: text,
+        };
+        emitNormalizedEvent("agent.message", messagePayload, sessionKey);
+      }
       const payload = {
         runId: clientRunId,
         sessionKey,
@@ -404,6 +449,17 @@ export function createAgentEventHandler({
     const agentPayload = sessionKey ? { ...eventForClients, sessionKey } : eventForClients;
     const last = agentRunSeq.get(evt.runId) ?? 0;
     const isToolEvent = evt.stream === "tool";
+    const metrics = getOrCreateStreamMetrics(evt.runId, evt.ts);
+    if (isToolEvent) {
+      metrics.toolCount += 1;
+    }
+    if (
+      evt.stream === "assistant" &&
+      typeof evt.data?.text === "string" &&
+      metrics.firstTokenMs === null
+    ) {
+      metrics.firstTokenMs = Math.max(0, evt.ts - metrics.acceptedAtMs);
+    }
     const toolVerbose = isToolEvent ? resolveToolVerboseLevel(evt.runId, sessionKey) : "off";
     // Build tool payload: strip result/partialResult unless verbose=full
     const toolPayload =
@@ -446,6 +502,120 @@ export function createAgentEventHandler({
 
     const lifecyclePhase =
       evt.stream === "lifecycle" && typeof evt.data?.phase === "string" ? evt.data.phase : null;
+
+    if (lifecyclePhase === "start") {
+      metrics.acceptedAtMs = evt.ts;
+      metrics.firstTokenMs = null;
+      metrics.toolCount = 0;
+      emitNormalizedEvent(
+        "agent.start",
+        {
+          runId: evt.runId,
+          sessionKey,
+          seq: evt.seq,
+          ts: evt.ts,
+          phase: "start",
+          executionMode: "stream",
+        },
+        sessionKey,
+      );
+    }
+
+    if (evt.stream === "assistant" && typeof evt.data?.text === "string") {
+      emitNormalizedEvent(
+        "agent.delta",
+        {
+          runId: evt.runId,
+          sessionKey,
+          seq: evt.seq,
+          ts: evt.ts,
+          text: evt.data.text,
+        },
+        sessionKey,
+      );
+    }
+
+    if (isToolEvent) {
+      const maybeState =
+        typeof evt.data?.state === "string"
+          ? evt.data.state
+          : typeof evt.data?.phase === "string"
+            ? evt.data.phase
+            : "update";
+      const normalizedToolStatePayload = {
+        runId: evt.runId,
+        sessionKey,
+        seq: evt.seq,
+        ts: evt.ts,
+        state: maybeState,
+        data: (toolPayload as { data?: Record<string, unknown> }).data ?? evt.data,
+      };
+      const recipients = toolEventRecipients.get(evt.runId);
+      if (recipients && recipients.size > 0) {
+        broadcastToConnIds("tool.state", normalizedToolStatePayload, recipients, {
+          dropIfSlow: true,
+        });
+      }
+      if (toolVerbose !== "off" && sessionKey) {
+        nodeSendToSession(sessionKey, "tool.state", normalizedToolStatePayload);
+      }
+    }
+
+    if (evt.stream === "context") {
+      emitNormalizedEvent(
+        "context.patch",
+        {
+          runId: evt.runId,
+          sessionKey,
+          seq: evt.seq,
+          ts: evt.ts,
+          patch: evt.data,
+        },
+        sessionKey,
+      );
+    }
+
+    if (evt.stream === "error") {
+      emitNormalizedEvent(
+        "error",
+        {
+          runId: evt.runId,
+          sessionKey,
+          seq: evt.seq,
+          ts: evt.ts,
+          error: evt.data,
+        },
+        sessionKey,
+      );
+    }
+
+    if (
+      (lifecyclePhase === "end" || lifecyclePhase === "error") &&
+      !normalizedFinalizedRuns.has(evt.runId)
+    ) {
+      normalizedFinalizedRuns.add(evt.runId);
+      const totalMs = Math.max(0, evt.ts - metrics.acceptedAtMs);
+      emitNormalizedEvent(
+        "agent.end",
+        {
+          runId: evt.runId,
+          sessionKey,
+          seq: evt.seq,
+          ts: evt.ts,
+          status: lifecyclePhase === "error" ? "error" : "ok",
+          metrics: {
+            acceptedAtMs: metrics.acceptedAtMs,
+            firstTokenMs: metrics.firstTokenMs,
+            totalMs,
+            toolCount: metrics.toolCount,
+            executionMode: "stream",
+          },
+          error: lifecyclePhase === "error" ? evt.data?.error : undefined,
+        },
+        sessionKey,
+      );
+      streamMetricsByRun.delete(evt.runId);
+    }
 
     if (sessionKey) {
       // Send tool events to node/channel subscribers only when verbose is enabled;
@@ -496,6 +666,7 @@ export function createAgentEventHandler({
       clearAgentRunContext(evt.runId);
       agentRunSeq.delete(evt.runId);
       agentRunSeq.delete(clientRunId);
+      streamMetricsByRun.delete(evt.runId);
     }
   };
 }

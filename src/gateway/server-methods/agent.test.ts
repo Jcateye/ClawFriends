@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { beforeEach } from "vitest";
+import type { GatewayRequestContext } from "./types.js";
 import { BARE_SESSION_RESET_PROMPT } from "../../auto-reply/reply/session-reset-prompt.js";
 import { agentHandlers } from "./agent.js";
-import type { GatewayRequestContext } from "./types.js";
 
 const mocks = vi.hoisted(() => ({
   loadSessionEntry: vi.fn(),
@@ -91,6 +92,10 @@ const makeContext = (): GatewayRequestContext =>
 
 type AgentHandlerArgs = Parameters<typeof agentHandlers.agent>[0];
 type AgentParams = AgentHandlerArgs["params"];
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.loadConfigReturn = {};
+});
 
 type AgentIdentityGetHandlerArgs = Parameters<(typeof agentHandlers)["agent.identity.get"]>[0];
 type AgentIdentityGetParams = AgentIdentityGetHandlerArgs["params"];
@@ -557,6 +562,208 @@ describe("gateway agent handler", () => {
       expect.objectContaining({
         message: expect.stringContaining("malformed session key"),
       }),
+    );
+  });
+
+  it("agent.execute rejects session keys outside tenant scope", async () => {
+    const respond = vi.fn();
+
+    await agentHandlers["agent.execute"]({
+      params: {
+        tenantId: "tenant-1",
+        agentScope: "agent-main",
+        sessionKey: "tenant:tenant-2:scope:agent-main:conv:1",
+        agentId: "main",
+        operation: "chat",
+        input: { message: "hello" },
+        traceId: "trace-1",
+        protocolVersion: "v2",
+        idempotencyKey: "idem-1",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ex-1", method: "agent.execute" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({ code: "tenant_scope_mismatch" }),
+    );
+    expect(mocks.agentCommand).not.toHaveBeenCalled();
+  });
+
+  it("agent.execute run unary returns terminal payload with metrics", async () => {
+    mocks.agentCommand.mockResolvedValueOnce({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 50 },
+    });
+    const respond = vi.fn();
+
+    await agentHandlers["agent.execute"]({
+      params: {
+        tenantId: "tenant-1",
+        agentScope: "agent-main",
+        sessionKey: "tenant:tenant-1:scope:agent-main:conv:1",
+        agentId: "main",
+        operation: "run",
+        mode: "unary",
+        input: { prompt: "summarize" },
+        traceId: "trace-run-1",
+        protocolVersion: "v2",
+        idempotencyKey: "idem-run-1",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ex-2", method: "agent.execute" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        status: "ok",
+        operation: "run",
+        mode: "unary",
+        traceId: "trace-run-1",
+        requestId: "ex-2",
+        metrics: expect.objectContaining({
+          executionMode: "unary",
+          acceptedAtMs: expect.any(Number),
+          totalMs: expect.any(Number),
+        }),
+      }),
+      undefined,
+      expect.objectContaining({ runId: "idem-run-1" }),
+    );
+  });
+
+  it("agent.execute returns trace and request ids in validation errors", async () => {
+    const respond = vi.fn();
+
+    await agentHandlers["agent.execute"]({
+      params: {
+        tenantId: "tenant-1",
+        agentScope: "agent-main",
+        sessionKey: "tenant:tenant-1:scope:agent-main:conv:3",
+        agentId: "main",
+        operation: "chat",
+        input: {},
+        traceId: "trace-invalid-1",
+        protocolVersion: "v2",
+        idempotencyKey: "idem-invalid-1",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ex-invalid-1", method: "agent.execute" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "invalid_request",
+        details: expect.objectContaining({
+          traceId: "trace-invalid-1",
+          requestId: "ex-invalid-1",
+        }),
+      }),
+    );
+  });
+
+  it("agent.execute chat stream delegates to legacy agent flow", async () => {
+    mocks.loadSessionEntry.mockReturnValue({
+      cfg: {},
+      storePath: "/tmp/sessions.json",
+      entry: {
+        sessionId: "existing-session-id",
+        updatedAt: Date.now(),
+      },
+      canonicalKey: "agent:main:main",
+    });
+    mocks.updateSessionStore.mockResolvedValue(undefined);
+    mocks.agentCommand.mockResolvedValue({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 100 },
+    });
+    const respond = vi.fn();
+
+    await agentHandlers["agent.execute"]({
+      params: {
+        tenantId: "tenant-1",
+        agentScope: "agent-main",
+        sessionKey: "tenant:tenant-1:scope:agent-main:conv:2",
+        agentId: "main",
+        operation: "chat",
+        mode: "stream",
+        input: { message: "hello from execute" },
+        traceId: "trace-chat-1",
+        protocolVersion: "v2",
+        idempotencyKey: "idem-chat-1",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ex-3", method: "agent.execute" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ status: "accepted" }),
+      undefined,
+      expect.objectContaining({ runId: "idem-chat-1" }),
+    );
+    await vi.waitFor(() =>
+      expect(respond).toHaveBeenCalledWith(
+        true,
+        expect.objectContaining({ status: "ok", runId: "idem-chat-1" }),
+        undefined,
+        expect.objectContaining({ runId: "idem-chat-1" }),
+      ),
+    );
+  });
+
+  it("agent.execute accepts legacy tenant scope session keys", async () => {
+    mocks.agentCommand.mockResolvedValueOnce({
+      payloads: [{ text: "ok" }],
+      meta: { durationMs: 20 },
+    });
+    const respond = vi.fn();
+
+    await agentHandlers["agent.execute"]({
+      params: {
+        tenantId: "tenant-1",
+        agentScope: "agent-main",
+        sessionKey: "tenant-1:agent-main:conv:legacy-1",
+        agentId: "main",
+        operation: "run",
+        mode: "unary",
+        input: { prompt: "legacy scope" },
+        traceId: "trace-legacy-1",
+        protocolVersion: "v2",
+        idempotencyKey: "idem-legacy-1",
+      },
+      respond,
+      context: makeContext(),
+      req: { type: "req", id: "ex-4", method: "agent.execute" },
+      client: null,
+      isWebchatConnect: () => false,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        status: "ok",
+        traceId: "trace-legacy-1",
+      }),
+      undefined,
+      expect.objectContaining({ runId: "idem-legacy-1" }),
     );
   });
 });

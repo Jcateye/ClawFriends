@@ -1,5 +1,7 @@
 import type { Static } from "@sinclair/typebox";
 import type {
+  AgentConfirmParamsSchema,
+  AgentExecuteParamsSchema,
   AgentEventSchema,
   AgentIdentityParamsSchema,
   AgentIdentityResultSchema,
@@ -150,6 +152,8 @@ export type PresenceEntry = Static<typeof PresenceEntrySchema>;
 export type ErrorShape = Static<typeof ErrorShapeSchema>;
 export type StateVersion = Static<typeof StateVersionSchema>;
 export type AgentEvent = Static<typeof AgentEventSchema>;
+export type AgentExecuteParams = Static<typeof AgentExecuteParamsSchema>;
+export type AgentConfirmParams = Static<typeof AgentConfirmParamsSchema>;
 export type AgentIdentityParams = Static<typeof AgentIdentityParamsSchema>;
 export type AgentIdentityResult = Static<typeof AgentIdentityResultSchema>;
 export type PollParams = Static<typeof PollParamsSchema>;

@@ -211,6 +211,13 @@ Agent runs are two-stage:
 1. Immediate accepted ack (`status:"accepted"`)
 2. Final completion response (`status:"ok"|"error"`), with streamed `agent` events in between.
 
+External integrations should prefer:
+
+- `agent.execute` for unified `chat` and `run` execution calls
+- `agent.confirm` for approval continuation (`confirmationId + approved`)
+- normalized lifecycle events (`agent.start`, `agent.delta`, `agent.message`, `tool.state`, `context.patch`, `agent.end`)
+- `/skills/reload` `protocolVersion=v2` for strict control-plane reload contracts
+
 See full protocol docs: [Gateway Protocol](/gateway/protocol).
 
 ## Operational checks

@@ -1,5 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
+import type {
+  GatewayAgentRow,
+  GatewaySessionRow,
+  GatewaySessionsDefaults,
+  SessionsListResult,
+} from "./session-utils.types.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { lookupContextTokens } from "../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS, DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
@@ -39,12 +45,6 @@ import {
 } from "../shared/avatar-policy.js";
 import { normalizeSessionDeliveryFields } from "../utils/delivery-context.js";
 import { readSessionTitleFieldsFromTranscript } from "./session-utils.fs.js";
-import type {
-  GatewayAgentRow,
-  GatewaySessionRow,
-  GatewaySessionsDefaults,
-  SessionsListResult,
-} from "./session-utils.types.js";
 
 export {
   archiveFileOnDisk,
@@ -75,6 +75,40 @@ function tryResolveExistingPath(value: string): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeScopePart(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/**
+ * Tenant scope contract for external integrators:
+ * - preferred: tenant:<tenantId>:scope:<agentScope>:...
+ * - compatibility: <tenantId>:<agentScope>:...
+ */
+export function isSessionKeyWithinTenantScope(params: {
+  tenantId: string;
+  agentScope: string;
+  sessionKey: string;
+}): boolean {
+  const tenantId = normalizeScopePart(params.tenantId);
+  const agentScope = normalizeScopePart(params.agentScope);
+  const sessionKey = normalizeScopePart(params.sessionKey);
+  if (!tenantId || !agentScope || !sessionKey) {
+    return false;
+  }
+  const canonicalPrefix = `tenant:${tenantId}:scope:${agentScope}:`;
+  const legacyPrefix = `${tenantId}:${agentScope}:`;
+  return sessionKey.startsWith(canonicalPrefix) || sessionKey.startsWith(legacyPrefix);
+}
+
+export function resolveTenantScopeSessionPrefix(params: {
+  tenantId: string;
+  agentScope: string;
+}): string {
+  const tenantId = normalizeScopePart(params.tenantId);
+  const agentScope = normalizeScopePart(params.agentScope);
+  return `tenant:${tenantId}:scope:${agentScope}:`;
 }
 
 function resolveIdentityAvatarUrl(

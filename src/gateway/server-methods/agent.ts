@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 import { listAgentIds } from "../../agents/agent-scope.js";
 import { BARE_SESSION_RESET_PROMPT } from "../../auto-reply/reply/session-reset-prompt.js";
 import { agentCommand } from "../../commands/agent.js";
@@ -36,12 +37,14 @@ import {
   ErrorCodes,
   errorShape,
   formatValidationErrors,
+  validateAgentExecuteParams,
   validateAgentIdentityParams,
   validateAgentParams,
   validateAgentWaitParams,
 } from "../protocol/index.js";
 import {
   canonicalizeSpawnedByForAgent,
+  isSessionKeyWithinTenantScope,
   loadSessionEntry,
   pruneLegacyStoreKeys,
   resolveGatewaySessionStoreTarget,
@@ -51,7 +54,6 @@ import { waitForAgentJob } from "./agent-job.js";
 import { injectTimestamp, timestampOptsFromConfig } from "./agent-timestamp.js";
 import { normalizeRpcAttachmentsToChatAttachments } from "./attachment-normalize.js";
 import { sessionsHandlers } from "./sessions.js";
-import type { GatewayRequestHandlerOptions, GatewayRequestHandlers } from "./types.js";
 
 const RESET_COMMAND_RE = /^\/(new|reset)(?:\s+([\s\S]*))?$/i;
 
@@ -150,6 +152,23 @@ async function runSessionResetFromAgent(params: {
       }
     })();
   });
+}
+
+function resolveExecuteInputMessage(input: Record<string, unknown>, operation: "chat" | "run") {
+  const messageRaw =
+    typeof input.message === "string"
+      ? input.message
+      : typeof input.prompt === "string"
+        ? input.prompt
+        : undefined;
+  const message = messageRaw?.trim();
+  if (message) {
+    return message;
+  }
+  if (operation === "run" && Object.keys(input).length > 0) {
+    return JSON.stringify(input);
+  }
+  return "";
 }
 
 export const agentHandlers: GatewayRequestHandlers = {
@@ -661,6 +680,216 @@ export const agentHandlers: GatewayRequestHandlers = {
           error: formatForLog(err),
         });
       });
+  },
+  "agent.execute": async ({ params, respond, context, client, req }) => {
+    const p = params;
+    if (!validateAgentExecuteParams(p)) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.EXTERNAL_INVALID_REQUEST,
+          `invalid agent.execute params: ${formatValidationErrors(validateAgentExecuteParams.errors)}`,
+        ),
+      );
+      return;
+    }
+
+    const request = p as {
+      tenantId: string;
+      agentScope: string;
+      sessionKey: string;
+      agentId: string;
+      operation: "chat" | "run";
+      mode?: "stream" | "unary";
+      input: Record<string, unknown>;
+      traceId: string;
+      protocolVersion: "v1" | "v2";
+      idempotencyKey: string;
+      timeout?: number;
+      thinking?: string;
+      deliver?: boolean;
+      channel?: string;
+      to?: string;
+    };
+    const requestId = req.id;
+
+    const sessionKey = request.sessionKey.trim();
+    if (
+      !isSessionKeyWithinTenantScope({
+        tenantId: request.tenantId,
+        agentScope: request.agentScope,
+        sessionKey,
+      })
+    ) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.EXTERNAL_TENANT_SCOPE_MISMATCH,
+          "sessionKey is outside tenant/agent scope",
+          {
+            details: {
+              requestId,
+              tenantId: request.tenantId,
+              agentScope: request.agentScope,
+              sessionKey,
+              traceId: request.traceId,
+            },
+            retryable: false,
+          },
+        ),
+      );
+      return;
+    }
+
+    const message = resolveExecuteInputMessage(request.input ?? {}, request.operation);
+    if (!message) {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.EXTERNAL_INVALID_REQUEST,
+          "agent.execute requires input.message or input.prompt (chat) / non-empty input (run)",
+          { retryable: false, details: { requestId, traceId: request.traceId } },
+        ),
+      );
+      return;
+    }
+
+    const mode = request.mode ?? (request.operation === "run" ? "unary" : "stream");
+
+    if (request.operation === "run" && mode === "unary") {
+      const runId = request.idempotencyKey.trim();
+      const cached = context.dedupe.get(`agent:${runId}`);
+      if (cached) {
+        respond(cached.ok, cached.payload, cached.error, { cached: true });
+        return;
+      }
+
+      const cfg = loadConfig();
+      const knownAgents = listAgentIds(cfg);
+      const normalizedAgentId = normalizeAgentId(request.agentId.trim());
+      if (!knownAgents.includes(normalizedAgentId)) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.EXTERNAL_INVALID_REQUEST, `unknown agent id "${request.agentId}"`, {
+            retryable: false,
+            details: { requestId, traceId: request.traceId },
+          }),
+        );
+        return;
+      }
+
+      const runStartedAt = Date.now();
+      registerAgentRunContext(runId, { sessionKey });
+      try {
+        const result = await agentCommand(
+          {
+            message,
+            sessionKey,
+            agentId: normalizedAgentId,
+            thinking: request.thinking,
+            deliver: request.deliver === true,
+            channel: request.channel,
+            to: request.to,
+            timeout: request.timeout?.toString(),
+            runId,
+            lane: "external-run",
+            extraSystemPrompt:
+              typeof request.input.extraSystemPrompt === "string"
+                ? request.input.extraSystemPrompt
+                : undefined,
+          },
+          defaultRuntime,
+          context.deps,
+        );
+        const runEndedAt = Date.now();
+        const payload = {
+          runId,
+          status: "ok" as const,
+          mode,
+          operation: request.operation,
+          tenantId: request.tenantId,
+          agentScope: request.agentScope,
+          sessionKey,
+          traceId: request.traceId,
+          requestId,
+          protocolVersion: request.protocolVersion,
+          metrics: {
+            acceptedAtMs: runStartedAt,
+            firstTokenMs: null,
+            totalMs: runEndedAt - runStartedAt,
+            toolCount: null,
+            executionMode: "unary",
+          },
+          result,
+        };
+        context.dedupe.set(`agent:${runId}`, {
+          ts: Date.now(),
+          ok: true,
+          payload,
+        });
+        respond(true, payload, undefined, { runId });
+      } catch (err) {
+        const error = errorShape(
+          ErrorCodes.EXTERNAL_INTERNAL_ERROR,
+          String(err instanceof Error ? err.message : err),
+          { retryable: true, details: { requestId, traceId: request.traceId } },
+        );
+        const payload = {
+          runId,
+          status: "error" as const,
+          mode,
+          operation: request.operation,
+          tenantId: request.tenantId,
+          agentScope: request.agentScope,
+          sessionKey,
+          traceId: request.traceId,
+          requestId,
+        };
+        context.dedupe.set(`agent:${runId}`, {
+          ts: Date.now(),
+          ok: false,
+          payload,
+          error,
+        });
+        respond(false, payload, error, { runId, error: formatForLog(err) });
+      }
+      return;
+    }
+
+    const legacyParams = {
+      message,
+      agentId: request.agentId,
+      sessionKey,
+      idempotencyKey: request.idempotencyKey,
+      thinking: request.thinking,
+      deliver: request.deliver,
+      channel: request.channel,
+      to: request.to,
+      timeout: request.timeout,
+      lane: request.operation === "run" ? "external-run" : "external-chat",
+      extraSystemPrompt:
+        typeof request.input.extraSystemPrompt === "string"
+          ? request.input.extraSystemPrompt
+          : undefined,
+    };
+
+    await agentHandlers.agent({
+      req: {
+        type: "req",
+        id: (Math.random() * 1_000_000_000).toFixed(0),
+        method: "agent",
+        params: legacyParams,
+      },
+      params: legacyParams,
+      respond,
+      context,
+      client,
+      isWebchatConnect: () => false,
+    });
   },
   "agent.identity.get": ({ params, respond }) => {
     if (!validateAgentIdentityParams(params)) {

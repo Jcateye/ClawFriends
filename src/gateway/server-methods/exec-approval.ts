@@ -1,19 +1,20 @@
 import type { ExecApprovalForwarder } from "../../infra/exec-approval-forwarder.js";
+import type { ExecApprovalManager } from "../exec-approval-manager.js";
+import type { GatewayRequestHandlers } from "./types.js";
 import {
   DEFAULT_EXEC_APPROVAL_TIMEOUT_MS,
   type ExecApprovalDecision,
 } from "../../infra/exec-approvals.js";
 import { buildSystemRunApprovalBindingV1 } from "../../infra/system-run-approval-binding.js";
 import { resolveSystemRunApprovalRequestContext } from "../../infra/system-run-approval-context.js";
-import type { ExecApprovalManager } from "../exec-approval-manager.js";
 import {
   ErrorCodes,
+  validateAgentConfirmParams,
   errorShape,
   formatValidationErrors,
   validateExecApprovalRequestParams,
   validateExecApprovalResolveParams,
 } from "../protocol/index.js";
-import type { GatewayRequestHandlers } from "./types.js";
 
 export function createExecApprovalHandlers(
   manager: ExecApprovalManager,
@@ -170,6 +171,18 @@ export function createExecApprovalHandlers(
         },
         { dropIfSlow: true },
       );
+      context.broadcast(
+        "tool.state",
+        {
+          state: "awaiting_input",
+          confirmationId: record.id,
+          request: record.request,
+          createdAtMs: record.createdAtMs,
+          expiresAtMs: record.expiresAtMs,
+          source: "exec.approval.request",
+        },
+        { dropIfSlow: true },
+      );
       let forwardedToTargets = false;
       if (opts?.forwarder) {
         try {
@@ -291,6 +304,62 @@ export function createExecApprovalHandlers(
           context.logGateway?.error?.(`exec approvals: forward resolve failed: ${String(err)}`);
         });
       respond(true, { ok: true }, undefined);
+    },
+    "agent.confirm": async ({ params, respond, client, context }) => {
+      if (!validateAgentConfirmParams(params)) {
+        respond(
+          false,
+          undefined,
+          errorShape(
+            ErrorCodes.EXTERNAL_INVALID_REQUEST,
+            `invalid agent.confirm params: ${formatValidationErrors(validateAgentConfirmParams.errors)}`,
+            { retryable: false },
+          ),
+        );
+        return;
+      }
+      const p = params as { confirmationId: string; approved: boolean; traceId: string };
+      const decision: ExecApprovalDecision = p.approved ? "allow-once" : "deny";
+      const resolvedBy = client?.connect?.client?.displayName ?? client?.connect?.client?.id;
+      const ok = manager.resolve(p.confirmationId, decision, resolvedBy ?? null);
+      if (!ok) {
+        respond(
+          false,
+          undefined,
+          errorShape(ErrorCodes.EXTERNAL_INVALID_REQUEST, "unknown confirmationId", {
+            retryable: false,
+            details: { traceId: p.traceId, confirmationId: p.confirmationId },
+          }),
+        );
+        return;
+      }
+      context.broadcast(
+        "exec.approval.resolved",
+        {
+          id: p.confirmationId,
+          decision,
+          resolvedBy,
+          ts: Date.now(),
+          traceId: p.traceId,
+          source: "agent.confirm",
+        },
+        { dropIfSlow: true },
+      );
+      void opts?.forwarder
+        ?.handleResolved({
+          id: p.confirmationId,
+          decision,
+          resolvedBy,
+          ts: Date.now(),
+        })
+        .catch((err) => {
+          context.logGateway?.error?.(`exec approvals: forward resolve failed: ${String(err)}`);
+        });
+      respond(
+        true,
+        { ok: true, confirmationId: p.confirmationId, approved: p.approved, traceId: p.traceId },
+        undefined,
+      );
     },
   };
 }

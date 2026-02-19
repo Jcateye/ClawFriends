@@ -182,15 +182,100 @@ The Gateway treats these as **claims** and enforces server-side allowlists.
 
 - When an exec request needs approval, the gateway broadcasts `exec.approval.requested`.
 - Operator clients resolve by calling `exec.approval.resolve` (requires `operator.approvals` scope).
+- External clients can resolve with `agent.confirm` using `{ confirmationId, approved, traceId }`.
+
+## External execution contract (v2)
+
+The gateway keeps legacy methods (`agent`, `chat.send`, `agent.wait`) and adds a new external method:
+
+- `agent.execute` request fields:
+  - `tenantId`, `agentScope`, `sessionKey`, `agentId`
+  - `operation`: `chat` or `run`
+  - `mode`: `stream` or `unary` (default `chat=stream`, `run=unary`)
+  - `input` (for example `input.message` or `input.prompt`)
+  - `traceId`, `protocolVersion`, `idempotencyKey`
+- `agent.confirm` request fields:
+  - `confirmationId`, `approved`, `traceId`
+
+### Normalized execution events
+
+In addition to legacy `agent` events, external clients can consume normalized events:
+
+- `agent.start`
+- `agent.delta`
+- `agent.message`
+- `tool.state`
+- `context.patch`
+- `agent.end` (terminal)
+- `error`
+
+`agent.end` includes terminal metrics when available:
+
+- `acceptedAtMs`
+- `firstTokenMs`
+- `totalMs`
+- `toolCount`
+- `executionMode`
+
+### Tenant scope guard
+
+For `agent.execute`, the gateway validates that `sessionKey` matches the caller tenant scope.
+The canonical format is:
+
+- `tenant:<tenantId>:scope:<agentScope>:...`
+
+Legacy prefix compatibility is also accepted:
+
+- `<tenantId>:<agentScope>:...`
+
+Scope violations return `tenant_scope_mismatch`.
+
+### External error codes
+
+External-facing contracts use snake_case codes:
+
+- `invalid_request`
+- `unauthorized`
+- `forbidden`
+- `tenant_scope_mismatch`
+- `protocol_version_unsupported`
+- `tool_confirmation_required`
+- `upstream_timeout`
+- `rate_limited`
+- `internal_error`
+
+## Skills reload contract (HTTP)
+
+`POST /skills/reload` supports a compatibility window:
+
+- `protocolVersion=v1`: compatibility mode
+- `protocolVersion=v2`: strict mode, requires `traceId`, `loadActions[]`, `unloadActions[]`
+
+The idempotency key is:
+
+- `tenantId + agentScope + desiredHash + protocolVersion`
+
+All success and error responses include `requestId`. Error payloads also include:
+
+- `code`
+- `message`
+- `retryable`
+- `traceId`
 
 ## Versioning
 
 - `PROTOCOL_VERSION` lives in `src/gateway/protocol/schema.ts`.
 - Clients send `minProtocol` + `maxProtocol`; the server rejects mismatches.
 - Schemas + models are generated from TypeBox definitions:
-  - `pnpm protocol:gen`
-  - `pnpm protocol:gen:swift`
-  - `pnpm protocol:check`
+- `pnpm protocol:gen`
+- `pnpm protocol:gen:swift`
+- `pnpm protocol:check`
+
+### External version window and rollback
+
+- Keep `v1` and `v2` available during migration.
+- If rollback is required, disable new method routing (`agent.execute`) and keep legacy `agent`.
+- For control-plane rollback, callers can switch `protocolVersion` back to `v1`.
 
 ## Auth
 
