@@ -81,6 +81,14 @@ describe("exec approval handlers", () => {
     expect(requested).toBeTruthy();
     const id = (requested?.payload as { id?: string })?.id ?? "";
     expect(id).not.toBe("");
+    const awaitingInput = broadcasts.find((entry) => entry.event === "tool.state");
+    expect(awaitingInput).toBeTruthy();
+    expect((awaitingInput?.payload as { state?: string; confirmationId?: string })?.state).toBe(
+      "awaiting_input",
+    );
+    expect(
+      (awaitingInput?.payload as { state?: string; confirmationId?: string })?.confirmationId,
+    ).toBe(id);
 
     const resolveRespond = vi.fn();
     await handlers["exec.approval.resolve"]({
@@ -272,5 +280,111 @@ describe("exec approval handlers", () => {
     });
 
     await requestPromise;
+  });
+
+  it("agent.confirm resolves pending approval by confirmationId", async () => {
+    const manager = new ExecApprovalManager();
+    const handlers = createExecApprovalHandlers(manager);
+    const broadcasts: Array<{ event: string; payload: unknown }> = [];
+
+    const requestRespond = vi.fn();
+    const context = {
+      broadcast: (event: string, payload: unknown) => {
+        broadcasts.push({ event, payload });
+      },
+      logGateway: { error: vi.fn() },
+    };
+
+    const requestPromise = handlers["exec.approval.request"]({
+      params: {
+        command: "echo ok",
+        cwd: "/tmp",
+        host: "node",
+        timeoutMs: 2000,
+      },
+      respond: requestRespond,
+      context: context as unknown as Parameters<
+        (typeof handlers)["exec.approval.request"]
+      >[0]["context"],
+      client: null,
+      req: { id: "req-confirm-1", type: "req", method: "exec.approval.request" },
+      isWebchatConnect: noop,
+    });
+
+    const requested = broadcasts.find((entry) => entry.event === "exec.approval.requested");
+    const confirmationId = (requested?.payload as { id?: string })?.id ?? "";
+    expect(confirmationId).not.toBe("");
+
+    const confirmRespond = vi.fn();
+    await handlers["agent.confirm"]({
+      params: {
+        confirmationId,
+        approved: true,
+        traceId: "trace-confirm-1",
+      },
+      respond: confirmRespond,
+      context: context as unknown as Parameters<(typeof handlers)["agent.confirm"]>[0]["context"],
+      client: { connect: { client: { id: "cli", displayName: "CLI" } } },
+      req: { id: "req-confirm-2", type: "req", method: "agent.confirm" },
+      isWebchatConnect: noop,
+    });
+
+    await requestPromise;
+
+    expect(confirmRespond).toHaveBeenCalledWith(
+      true,
+      {
+        ok: true,
+        confirmationId,
+        approved: true,
+        traceId: "trace-confirm-1",
+      },
+      undefined,
+    );
+    expect(requestRespond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ id: confirmationId, decision: "allow-once" }),
+      undefined,
+    );
+    expect(
+      broadcasts.some(
+        (entry) =>
+          entry.event === "exec.approval.resolved" &&
+          (entry.payload as { id?: string; source?: string }).id === confirmationId &&
+          (entry.payload as { id?: string; source?: string }).source === "agent.confirm",
+      ),
+    ).toBe(true);
+  });
+
+  it("agent.confirm rejects unknown confirmationId", async () => {
+    const manager = new ExecApprovalManager();
+    const handlers = createExecApprovalHandlers(manager);
+    const respond = vi.fn();
+    const context = {
+      broadcast: () => {},
+      logGateway: { error: vi.fn() },
+    };
+
+    await handlers["agent.confirm"]({
+      params: {
+        confirmationId: "missing-id",
+        approved: false,
+        traceId: "trace-confirm-404",
+      },
+      respond,
+      context: context as unknown as Parameters<(typeof handlers)["agent.confirm"]>[0]["context"],
+      client: { connect: { client: { id: "cli", displayName: "CLI" } } },
+      req: { id: "req-confirm-3", type: "req", method: "agent.confirm" },
+      isWebchatConnect: noop,
+    });
+
+    expect(respond).toHaveBeenCalledWith(
+      false,
+      undefined,
+      expect.objectContaining({
+        code: "invalid_request",
+        message: "unknown confirmationId",
+      }),
+    );
   });
 });

@@ -76,6 +76,40 @@ const AVATAR_MIME_BY_EXT: Record<string, string> = {
   ".tiff": "image/tiff",
 };
 
+function normalizeScopePart(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/**
+ * Tenant scope contract for external integrators:
+ * - preferred: tenant:<tenantId>:scope:<agentScope>:...
+ * - compatibility: <tenantId>:<agentScope>:...
+ */
+export function isSessionKeyWithinTenantScope(params: {
+  tenantId: string;
+  agentScope: string;
+  sessionKey: string;
+}): boolean {
+  const tenantId = normalizeScopePart(params.tenantId);
+  const agentScope = normalizeScopePart(params.agentScope);
+  const sessionKey = normalizeScopePart(params.sessionKey);
+  if (!tenantId || !agentScope || !sessionKey) {
+    return false;
+  }
+  const canonicalPrefix = `tenant:${tenantId}:scope:${agentScope}:`;
+  const legacyPrefix = `${tenantId}:${agentScope}:`;
+  return sessionKey.startsWith(canonicalPrefix) || sessionKey.startsWith(legacyPrefix);
+}
+
+export function resolveTenantScopeSessionPrefix(params: {
+  tenantId: string;
+  agentScope: string;
+}): string {
+  const tenantId = normalizeScopePart(params.tenantId);
+  const agentScope = normalizeScopePart(params.agentScope);
+  return `tenant:${tenantId}:scope:${agentScope}:`;
+}
+
 function resolveAvatarMime(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   return AVATAR_MIME_BY_EXT[ext] ?? "application/octet-stream";

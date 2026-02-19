@@ -32,7 +32,11 @@ const WRITE_SCOPE = "operator.write";
 const APPROVALS_SCOPE = "operator.approvals";
 const PAIRING_SCOPE = "operator.pairing";
 
-const APPROVAL_METHODS = new Set(["exec.approval.request", "exec.approval.resolve"]);
+const APPROVAL_METHODS = new Set([
+  "exec.approval.request",
+  "exec.approval.resolve",
+  "agent.confirm",
+]);
 const NODE_ROLE_METHODS = new Set(["node.invoke.result", "node.event", "skills.bins"]);
 const PAIRING_METHODS = new Set([
   "node.pair.request",
@@ -76,6 +80,7 @@ const READ_METHODS = new Set([
 const WRITE_METHODS = new Set([
   "send",
   "agent",
+  "agent.execute",
   "agent.wait",
   "wake",
   "talk.mode",
