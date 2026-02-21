@@ -39,6 +39,8 @@ import {
 } from "./agents-models-skills.js";
 import {
   ChannelsLogoutParamsSchema,
+  TalkConfigParamsSchema,
+  TalkConfigResultSchema,
   ChannelsStatusParamsSchema,
   ChannelsStatusResultSchema,
   TalkModeParamsSchema,
@@ -68,6 +70,7 @@ import {
 import {
   DevicePairApproveParamsSchema,
   DevicePairListParamsSchema,
+  DevicePairRemoveParamsSchema,
   DevicePairRejectParamsSchema,
   DevicePairRequestedEventSchema,
   DevicePairResolvedEventSchema,
@@ -117,6 +120,7 @@ import {
   NodePairVerifyParamsSchema,
   NodeRenameParamsSchema,
 } from "./nodes.js";
+import { PushTestParamsSchema, PushTestResultSchema } from "./push.js";
 import {
   SessionsCompactParamsSchema,
   SessionsDeleteParamsSchema,
@@ -172,6 +176,8 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   NodeInvokeResultParams: NodeInvokeResultParamsSchema,
   NodeEventParams: NodeEventParamsSchema,
   NodeInvokeRequestEvent: NodeInvokeRequestEventSchema,
+  PushTestParams: PushTestParamsSchema,
+  PushTestResult: PushTestResultSchema,
   SessionsListParams: SessionsListParamsSchema,
   SessionsPreviewParams: SessionsPreviewParamsSchema,
   SessionsResolveParams: SessionsResolveParamsSchema,
@@ -195,6 +201,8 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   WizardStartResult: WizardStartResultSchema,
   WizardStatusResult: WizardStatusResultSchema,
   TalkModeParams: TalkModeParamsSchema,
+  TalkConfigParams: TalkConfigParamsSchema,
+  TalkConfigResult: TalkConfigResultSchema,
   ChannelsStatusParams: ChannelsStatusParamsSchema,
   ChannelsStatusResult: ChannelsStatusResultSchema,
   ChannelsLogoutParams: ChannelsLogoutParamsSchema,
@@ -245,6 +253,7 @@ export const ProtocolSchemas: Record<string, TSchema> = {
   DevicePairListParams: DevicePairListParamsSchema,
   DevicePairApproveParams: DevicePairApproveParamsSchema,
   DevicePairRejectParams: DevicePairRejectParamsSchema,
+  DevicePairRemoveParams: DevicePairRemoveParamsSchema,
   DeviceTokenRotateParams: DeviceTokenRotateParamsSchema,
   DeviceTokenRevokeParams: DeviceTokenRevokeParamsSchema,
   DevicePairRequestedEvent: DevicePairRequestedEventSchema,
