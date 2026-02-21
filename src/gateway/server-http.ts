@@ -47,6 +47,7 @@ import { sendUnauthorized } from "./http-common.js";
 import { getBearerToken, getHeader } from "./http-utils.js";
 import { resolveGatewayClientIp } from "./net.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
+import { handleOpenApiHttpRequest } from "./openapi-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { handleSkillsReloadHttpRequest } from "./skills-reload-http.js";
 import { handleToolsInvokeHttpRequest } from "./tools-invoke-http.js";
@@ -406,6 +407,9 @@ export function createGatewayHttpServer(opts: {
       const configSnapshot = loadConfig();
       const trustedProxies = configSnapshot.gateway?.trustedProxies ?? [];
       const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
+      if (await handleOpenApiHttpRequest(req, res)) {
+        return;
+      }
       if (await handleHooksRequest(req, res)) {
         return;
       }
