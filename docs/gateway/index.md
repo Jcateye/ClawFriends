@@ -220,6 +220,11 @@ External integrations should prefer:
 
 See full protocol docs: [Gateway Protocol](/gateway/protocol).
 
+OpenAPI and Swagger endpoints are available directly from the gateway:
+
+- `GET /openapi.json`
+- `GET /swagger`
+
 ## Operational checks
 
 ### Liveness

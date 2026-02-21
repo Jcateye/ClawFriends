@@ -59,6 +59,7 @@ import {
 import { sendGatewayAuthFailure, setDefaultSecurityHeaders } from "./http-common.js";
 import { getBearerToken } from "./http-utils.js";
 import { handleOpenAiHttpRequest } from "./openai-http.js";
+import { handleOpenApiHttpRequest } from "./openapi-http.js";
 import { handleOpenResponsesHttpRequest } from "./openresponses-http.js";
 import { GATEWAY_CLIENT_MODES, normalizeGatewayClientMode } from "./protocol/client-info.js";
 import { isProtectedPluginRoutePath } from "./security-path.js";
@@ -512,6 +513,9 @@ export function createGatewayHttpServer(opts: {
         req.url = scopedCanvas.rewrittenUrl;
       }
       const requestPath = new URL(req.url ?? "/", "http://localhost").pathname;
+      if (await handleOpenApiHttpRequest(req, res)) {
+        return;
+      }
       if (await handleHooksRequest(req, res)) {
         return;
       }

@@ -262,6 +262,18 @@ All success and error responses include `requestId`. Error payloads also include
 - `retryable`
 - `traceId`
 
+## Swagger and OpenAPI
+
+Gateway exposes machine-readable external contract docs:
+
+- `GET /openapi.json` (OpenAPI 3.1)
+- `GET /swagger` (Swagger UI)
+
+These docs cover:
+
+- `/skills/reload` control-plane contract
+- `/ws` WebSocket gateway entry with `agent.execute` and `agent.confirm` method schemas (via `x-openclaw-websocket` extensions)
+
 ## Versioning
 
 - `PROTOCOL_VERSION` lives in `src/gateway/protocol/schema.ts`.
