@@ -59,13 +59,16 @@ describe("exec approval handlers", () => {
       broadcast: (event: string, payload: unknown) => {
         broadcasts.push({ event, payload });
       },
+      hasExecApprovalClients: () => true,
     };
 
     const requestPromise = handlers["exec.approval.request"]({
       params: {
         command: "echo ok",
+        commandArgv: ["echo", "ok"],
         cwd: "/tmp",
         host: "node",
+        nodeId: "node-1",
         timeoutMs: 2000,
       },
       respond,
@@ -140,13 +143,16 @@ describe("exec approval handlers", () => {
           isWebchatConnect: noop,
         });
       },
+      hasExecApprovalClients: () => true,
     };
 
     await handlers["exec.approval.request"]({
       params: {
         command: "echo ok",
+        commandArgv: ["echo", "ok"],
         cwd: "/tmp",
         host: "node",
+        nodeId: "node-1",
         timeoutMs: 2000,
       },
       respond,
@@ -176,6 +182,7 @@ describe("exec approval handlers", () => {
       broadcast: (event: string, payload: unknown) => {
         broadcasts.push({ event, payload });
       },
+      hasExecApprovalClients: () => true,
     };
 
     const requestPromise = handlers["exec.approval.request"]({
@@ -229,6 +236,7 @@ describe("exec approval handlers", () => {
       broadcast: (event: string, payload: unknown) => {
         broadcasts.push({ event, payload });
       },
+      hasExecApprovalClients: () => true,
     };
 
     const requestPromise = handlers["exec.approval.request"]({
@@ -292,14 +300,17 @@ describe("exec approval handlers", () => {
       broadcast: (event: string, payload: unknown) => {
         broadcasts.push({ event, payload });
       },
+      hasExecApprovalClients: () => true,
       logGateway: { error: vi.fn() },
     };
 
     const requestPromise = handlers["exec.approval.request"]({
       params: {
         command: "echo ok",
+        commandArgv: ["echo", "ok"],
         cwd: "/tmp",
         host: "node",
+        nodeId: "node-1",
         timeoutMs: 2000,
       },
       respond: requestRespond,

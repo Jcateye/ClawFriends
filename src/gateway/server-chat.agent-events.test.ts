@@ -445,8 +445,10 @@ describe("agent event handler", () => {
       },
     });
 
-    expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
-    const payload = broadcastToConnIds.mock.calls[0]?.[1] as { runId?: string };
+    expect(broadcastToConnIds).toHaveBeenCalledTimes(2);
+    const payload = broadcastToConnIds.mock.calls.find(([event]) => event === "agent")?.[1] as {
+      runId?: string;
+    };
     expect(payload.runId).toBe("run-tool-client");
     resetAgentRunContextForTest();
   });
