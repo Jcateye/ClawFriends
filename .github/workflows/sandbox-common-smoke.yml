@@ -1,12 +1,6 @@
 name: Sandbox Common Smoke
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - Dockerfile.sandbox
-      - Dockerfile.sandbox-common
-      - scripts/sandbox-common-setup.sh
   pull_request:
     paths:
       - Dockerfile.sandbox
